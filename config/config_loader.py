@@ -2,85 +2,131 @@
 import os
 from dotenv import load_dotenv
 
-# 构建 .env 文件的路径，该文件应该在 config 目录中
-# __file__ 是当前 config_loader.py 文件的路径
-# os.path.dirname(__file__) 是 config_loader.py 所在的目录 (即 config 目录)
-# os.path.join(...) 会正确地将它们连接起来
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
-
-# 加载 .env 文件中的环境变量
-# 如果 .env 文件不存在，load_dotenv 不会报错，但变量不会被加载
 if os.path.exists(dotenv_path):
-    load_dotenv(dotenv_path=dotenv_path, override=True) # override=True 允许覆盖已存在的系统环境变量
-    # print(f"已从 {dotenv_path} 加载配置。") # 用于调试
+    load_dotenv(dotenv_path=dotenv_path, override=True)
 else:
-    # print(f"警告: 配置文件 {dotenv_path} 未找到。将依赖系统环境变量。") # 用于调试
-    pass
-
+    print(f"警告: 配置文件 {dotenv_path} 未找到。将依赖系统环境变量。")
 
 class AppConfig:
-    """
-    应用程序配置类。
-    从环境变量加载和提供配置参数。
-    """
     def __init__(self):
-        # 从环境变量获取配置，如果未设置则提供默认值或 None
-        self.openai_api_key: str = os.getenv("OPENAI_API_KEY")
-        self.oai_model_name: str = os.getenv("OAI_MODEL_NAME", "gpt-3.5-turbo") # 提供一个默认模型
+        self.llm_provider: str = os.getenv("LLM_PROVIDER", "openai").lower()
 
-        # 可以在这里添加更多的配置参数
-        # self.another_api_key: str = os.getenv("ANOTHER_API_KEY")
+        # OpenAI settings
+        self.openai_api_key: str = os.getenv("OPENAI_API_KEY")
+        self.openai_model_name: str = os.getenv("OAI_MODEL_NAME", "gpt-3.5-turbo")
+        self.openai_api_base: str = os.getenv("OPENAI_API_BASE") 
+
+        # Ollama settings
+        self.ollama_api_base: str = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+        self.ollama_model_name: str = os.getenv("OLLAMA_MODEL_NAME", "llama3") # Default if not in .env
+        # self.ollama_context_window: int = int(os.getenv("OLLAMA_CONTEXT_WINDOW", "0")) # Example if we add context window
+
+        # ZhipuAI settings
+        self.zhipu_api_key: str = os.getenv("ZHIPU_API_KEY")
+        self.zhipu_model_name: str = os.getenv("ZHIPU_MODEL_NAME", "glm-4") # Default if not in .env
+        self.zhipu_api_base: str = os.getenv("ZHIPU_API_BASE") 
+
+        self._validate_config()
+
+    def _validate_config(self):
+        if self.llm_provider == "openai":
+            if not self.openai_api_key or self.openai_api_key == "YOUR_OPENAI_API_KEY_HERE":
+                print("警告：LLM_PROVIDER 设置为 'openai'，但 OPENAI_API_KEY 未配置或仍为占位符。")
+        elif self.llm_provider == "ollama":
+            if not self.ollama_model_name:
+                print("警告：LLM_PROVIDER 设置为 'ollama'，但 OLLAMA_MODEL_NAME 未配置。")
+        elif self.llm_provider == "zhipu":
+            if not self.zhipu_api_key or self.zhipu_api_key == "c859bf3bcec5fbcf4b5897a2c3dc9a6e.hS8pVPUzEJNLinwo" or self.zhipu_api_key == "YOUR_ZHIPU_API_KEY_HERE": # Updated placeholder check
+                # This check is a bit tricky if the actual key can be the placeholder value.
+                # Better to rely on user knowing if it's a real key.
+                pass # Assuming user has put a real key if it's not the default placeholder
+            if not self.zhipu_model_name:
+                print("警告：LLM_PROVIDER 设置为 'zhipu'，但 ZHIPU_MODEL_NAME 未配置。")
 
     def get_llm_config(self) -> dict:
-        """
-        为 AutoGen 代理生成 LLM 配置字典。
-        确保 API 密钥已配置。
-        """
-        if not self.openai_api_key or self.openai_api_key == "YOUR_OPENAI_API_KEY_HERE":
-            # 如果用户忘记替换占位符，也视为未配置
-            # print("错误：OPENAI_API_KEY 未在 .env 文件中配置或仍然是占位符。") # 用于调试
-            # raise ValueError("OPENAI_API_KEY 未在 .env 文件中正确配置。请检查 config/.env 文件。")
-            # 对于 AssistantAgent，如果 llm_config 中的 api_key 为 None 或未提供，它会尝试从环境变量直接读取
-            # 所以这里返回 None 也是一种策略，让 AutoGen 自己处理
-            return {
-                "model": self.oai_model_name,
-                "api_key": None, # 让 AssistantAgent 尝试从 os.environ.get("OPENAI_API_KEY") 读取
-            }
-        
-        return {
-            "model": self.oai_model_name,
-            "api_key": self.openai_api_key,
-            # "timeout": 600, # 可选：添加超时等参数
-            # "cache_seed": 42, # 可选：用于可复现的 LLM 调用
-        }
+        llm_config = {}
 
-# 创建一个全局配置实例，方便在其他模块中导入和使用
-# 例如: from config.config_loader import app_config
-# api_key = app_config.openai_api_key
-# llm_config = app_config.get_llm_config()
+        if self.llm_provider == "openai":
+            api_key_to_use = self.openai_api_key if (self.openai_api_key and self.openai_api_key != "YOUR_OPENAI_API_KEY_HERE") else None
+            if not api_key_to_use:
+                print("警告：OpenAI API 密钥未在 .env 中正确配置。AutoGen 将尝试从环境变量 OPENAI_API_KEY 读取。")
+            
+            llm_config = {
+                "model": self.openai_model_name,
+                "api_key": api_key_to_use,
+            }
+            if self.openai_api_base:
+                llm_config["base_url"] = self.openai_api_base
+
+        elif self.llm_provider == "ollama":
+            if not self.ollama_model_name:
+                raise ValueError("OLLAMA_MODEL_NAME 未在 .env 文件中配置，但 LLM_PROVIDER 设置为 'ollama'。")
+            
+            llm_config = {
+                "model": self.ollama_model_name,
+                "base_url": self.ollama_api_base, 
+                "api_key": "ollama", 
+                # if self.ollama_context_window > 0:
+                #    llm_config["max_tokens"] = self.ollama_context_window # Or appropriate param name
+            }
+
+        elif self.llm_provider == "zhipu":
+            if not self.zhipu_api_key or self.zhipu_api_key == "YOUR_ZHIPU_API_KEY_HERE":
+                 raise ValueError("ZHIPU_API_KEY 未在 .env 文件中正确配置，但 LLM_PROVIDER 设置为 'zhipu'。")
+            if not self.zhipu_model_name:
+                raise ValueError("ZHIPU_MODEL_NAME 未在 .env 文件中配置，但 LLM_PROVIDER 设置为 'zhipu'。")
+
+            llm_config = {
+                "model": self.zhipu_model_name,
+                "api_key": self.zhipu_api_key,
+            }
+            # If ZhipuAI uses a specific base_url for its OpenAI-compatible API, add it.
+            # This is often needed if their SDK doesn't default to it or if we are using a generic OpenAI client.
+            if self.zhipu_api_base:
+                llm_config["base_url"] = self.zhipu_api_base
+        
+        else:
+            print(f"警告：未知的 LLM_PROVIDER '{self.llm_provider}'。将返回空配置。")
+        
+        return llm_config
+
 app_config = AppConfig()
 
 if __name__ == '__main__':
-    # 此部分用于测试 config_loader.py 是否能正确加载配置
-    print("测试加载配置:")
-    if app_config.openai_api_key and app_config.openai_api_key != "YOUR_OPENAI_API_KEY_HERE":
-        print(f"  OpenAI API 密钥: {'*' * 10}{app_config.openai_api_key[-4:]}") # 打印部分密钥以确认加载
-    else:
-        print("  OpenAI API 密钥: 未配置或仍为占位符。")
-    
-    print(f"  OpenAI 模型名称: {app_config.oai_model_name}")
-    
-    llm_settings = app_config.get_llm_config()
-    print("  生成的 LLM 配置 (用于 AutoGen):")
-    if llm_settings.get("api_key"):
-        print(f"    API Key: {'*' * 10}{llm_settings['api_key'][-4:]}")
-    else:
-        print(f"    API Key: 未提供 (AutoGen 将尝试从环境变量 OPENAI_API_KEY 读取)")
-    print(f"    Model: {llm_settings['model']}")
+    print("测试加载配置 (增强版):")
+    print(f"  LLM Provider: {app_config.llm_provider}")
 
+    if app_config.llm_provider == "openai":
+        # ... (OpenAI print logic as before)
+        if app_config.openai_api_key and app_config.openai_api_key != "YOUR_OPENAI_API_KEY_HERE":
+            print(f"  OpenAI API 密钥: {'*' * 10 + app_config.openai_api_key[-4:]}")
+        else:
+            print("  OpenAI API 密钥: 未配置或占位符。")
+        print(f"  OpenAI 模型名称: {app_config.openai_model_name}")
+        if app_config.openai_api_base:
+            print(f"  OpenAI API Base: {app_config.openai_api_base}")
+
+    elif app_config.llm_provider == "ollama":
+        print(f"  Ollama Configured API Base (from OLLAMA_API_BASE env): {app_config.ollama_api_base}")
+        print(f"  Ollama 模型名称: {app_config.ollama_model_name}")
+
+    elif app_config.llm_provider == "zhipu":
+        if app_config.zhipu_api_key and app_config.zhipu_api_key != "YOUR_ZHIPU_API_KEY_HERE": # Check against default placeholder
+             print(f"  ZhipuAI API 密钥: {'*' * 10 + app_config.zhipu_api_key[-4:] if app_config.zhipu_api_key else '未配置'}")
+        else:
+             print("  ZhipuAI API 密钥: 未配置或占位符。")
+        print(f"  ZhipuAI 模型名称: {app_config.zhipu_model_name}")
+        if app_config.zhipu_api_base:
+            print(f"  ZhipuAI API Base: {app_config.zhipu_api_base}")
+
+    llm_settings = app_config.get_llm_config()
+    print(f"\n  生成的 LLM 配置 (用于 AutoGen for {app_config.llm_provider}):")
+    for key, value in llm_settings.items():
+        if key == "api_key" and value and isinstance(value, str) and len(value) > 4 : # Check type and length
+            print(f"    {key.capitalize()}: {'*' * 10 + value[-4:]}")
+        else:
+            print(f"    {key.capitalize()}: {value}")
+    
     if not os.path.exists(dotenv_path):
         print(f"\n警告: {dotenv_path} 文件未找到。")
-        print("请确保在 'config' 目录下创建 '.env' 文件并填入您的 API 密钥。")
-        print("示例 .env 内容:")
-        print("OPENAI_API_KEY=\"sk-xxxxxxxxxxxxxxxxxxxx\"")
-        print("OAI_MODEL_NAME=\"gpt-4\"")

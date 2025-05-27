@@ -33,15 +33,14 @@ async def main_workflow():
     )
 
     # 日志分析代理，配备了日志分析工具
-    # 为其 llm_config 添加工具定义
-    log_analyzer_llm_config = app_config.get_llm_config()
-    log_analyzer_llm_config["tools"] = [
+    log_analyzer_llm_config_raw = app_config.get_llm_config() # Get the raw config dict
+    log_analyzer_llm_config_raw["tools"] = [
         {
             "type": "function",
             "function": {
                 "name": "analyze_log_entry",
                 "description": "分析单个日志条目并返回详细的分析结果。",
-                "parameters": {
+                "parameters": { # ... (parameters as before)
                     "type": "object",
                     "properties": {
                         "log_entry": {
@@ -54,36 +53,50 @@ async def main_workflow():
             }
         }
     ]
-    # tool_choice="auto" is often default if tools are provided.
-    # Forcing can be done with:
-    # log_analyzer_llm_config["tool_choice"] = {"type": "function", "function": {"name": "analyze_log_entry"}}
+
+    # 选择模型客户端实例
+    log_analyzer_model_client = None
+    if app_config.llm_provider == "ollama" and OllamaChatCompletionClient:
+        current_ollama_config = app_config.get_llm_config() # Get fresh config for ollama
+        if 'api_base' in current_ollama_config and 'base_url' not in current_ollama_config:
+             current_ollama_config['base_url'] = current_ollama_config.pop('api_base')
+        log_analyzer_model_client = OllamaChatCompletionClient(**current_ollama_config)
+    elif app_config.llm_provider == "openai" or app_config.llm_provider == "zhipu": # Assuming Zhipu is OpenAI compatible for now
+        log_analyzer_model_client = OpenAIChatCompletionClient(**app_config.get_llm_config())
+    else:
+        raise ValueError(f"不支持的 LLM 提供商: {app_config.llm_provider}，无法创建模型客户端。")
 
 
     log_analyzer = LogAnalysisAgent(
         name="日志分析专家",
-        llm_config=log_analyzer_llm_config,
+        model_client=log_analyzer_model_client, # Pass the instantiated client
         system_message="你是一名日志分析专家。当给定一个日志条目时，你的任务是使用 'analyze_log_entry' 工具对其进行彻底分析，并清晰地报告分析结果。"
     )
+    log_analyzer.llm_config = log_analyzer_llm_config_raw
+    
     # 注册实际的Python函数到日志分析代理
-    # This ensures the agent can execute the tool when the LLM decides to use it.
-    log_analyzer.register_model_client(model_client=None) # Ensure model client is initialized
     log_analyzer.register_function(
-        tool_map={
-            "analyze_log_entry": analyze_log_entry
-        }
+        tool_map={"analyze_log_entry": analyze_log_entry}
     )
     
     # 编排代理
-    # The orchestrator might also need to know about the tools if it's to make informed decisions
-    # about which agent can handle which tool, or if it needs to validate plans involving tools.
-    # For this basic workflow, we'll keep it simpler: the orchestrator delegates tasks based on agent roles.
-    orchestrator_llm_config = app_config.get_llm_config()
-    # Optionally, make orchestrator aware of tools if it needs to reason about them.
-    # orchestrator_llm_config["tools"] = log_analyzer_llm_config["tools"] 
-    
+    orchestrator_llm_config_raw = app_config.get_llm_config()
+    # orchestrator_llm_config_raw["tools"] = ... # if orchestrator needs tools
+
+    orchestrator_model_client = None
+    if app_config.llm_provider == "ollama" and OllamaChatCompletionClient:
+        current_ollama_config_orch = app_config.get_llm_config()
+        if 'api_base' in current_ollama_config_orch and 'base_url' not in current_ollama_config_orch:
+             current_ollama_config_orch['base_url'] = current_ollama_config_orch.pop('api_base')
+        orchestrator_model_client = OllamaChatCompletionClient(**current_ollama_config_orch)
+    elif app_config.llm_provider == "openai" or app_config.llm_provider == "zhipu":
+        orchestrator_model_client = OpenAIChatCompletionClient(**app_config.get_llm_config())
+    else:
+        raise ValueError(f"不支持的 LLM 提供商: {app_config.llm_provider}，无法为编排器创建模型客户端。")
+
     orchestrator = OrchestratorAgent(
         name="首席事件编排员",
-        llm_config=orchestrator_llm_config,
+        model_client=orchestrator_model_client,
         system_message="""你是一位首席AI事件编排员。
         你的职责是理解用户报告的初步安全信息，然后协调其他AI智能体（如日志分析专家）来处理具体任务。
         你需要制定一个高层次的计划，并将具体的分析任务分配给合适的专家。
@@ -91,7 +104,7 @@ async def main_workflow():
         如果日志分析专家需要分析日志，请明确指示它使用 'analyze_log_entry' 工具。
         """
     )
-    # If the orchestrator itself was supposed to use tools, it would need register_function too.
+    orchestrator.llm_config = orchestrator_llm_config_raw # Pass raw config for reference or tool use
 
     print("\n智能体初始化完成:")
     print(f"- {user_proxy.name} ({user_proxy.human_input_mode} human input)")
