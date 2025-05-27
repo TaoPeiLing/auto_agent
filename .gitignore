@@ -1,0 +1,22 @@
+# 配置文件，可能包含敏感信息
+config/.env
+
+# Python 缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# IDE 和编辑器特定文件
+.idea/
+.vscode/
+*.swp
+*.swo
